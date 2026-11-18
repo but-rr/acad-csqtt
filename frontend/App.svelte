@@ -27,7 +27,7 @@
   saveChain=saveChain.catch(()=>{}).then(()=>backend().SaveProfile(value,enabled));
   try{await saveChain;if(saveRevision===revision){saveRevision=0;saveMessage=enabled?'Настройки сохранены':'Сохранение выключено';}}catch(e){saveMessage='Не удалось сохранить';throw e;}
  }
- async function toggle(){if(action||stopping)return;action=true;error='';try{if(running){await backend().Disconnect();state={...state,status:'stopping',message:'Восстанавливаю настройки сети…'};}else{await flush();await backend().Connect();state={...state,status:'connecting',message:'Получаю конфигурацию сервера…'};}}catch(e){error=String(e);if(!running)page='settings';}finally{action=false;}}
+ async function toggle(){if(action||stopping)return;action=true;error='';try{let next:State;if(running){next=await backend().Disconnect();}else{await flush();next=await backend().Connect();}if(next.revision>=state.revision)accept(next);}catch(e){error=String(e);if(!running)page='settings';}finally{action=false;}}
  async function mode(key:keyof Profile,value:string){profile[key]=value;dirty();if(key==='system_proxy'){try{await flush();await backend().SetSystemProxy(value==='1');}catch(e){error=String(e);}}}
  async function checkProxy(){proxyBusy=true;proxyMessage='Проверяю CONNECT на 443…';try{await backend().CheckProxy({...profile});proxyOK=true;proxyMessage='Прокси доступен · CONNECT :443 разрешён';}catch(e){proxyOK=false;proxyMessage=String(e);}finally{proxyBusy=false;}}
  async function checkUpdates(){manualUpdate=true;state={...state,updateChecking:true};await flush();await backend().CheckUpdates();}

@@ -84,7 +84,7 @@ func (a *App) domReady(ctx context.Context) {
 		time.Sleep(time.Second)
 		a.CheckUpdates()
 		if hasArgument("--connect") {
-			_ = a.Connect()
+			_ = a.connect()
 		}
 		ticker := time.NewTicker(6 * time.Hour)
 		defer ticker.Stop()
@@ -139,7 +139,8 @@ func (a *App) SetDraft(p client.Profile, remember bool) {
 	})
 	a.mu.Unlock()
 }
-func (a *App) Connect() error {
+func (a *App) Connect() (client.State, error) { e := a.connect(); return a.manager.Snapshot(), e }
+func (a *App) connect() error {
 	a.mu.Lock()
 	p, remember := a.profile, a.remember
 	a.mu.Unlock()
@@ -159,7 +160,7 @@ func (a *App) Connect() error {
 	}
 	return a.manager.Start(p)
 }
-func (a *App) Disconnect()                       { a.manager.Stop() }
+func (a *App) Disconnect() client.State          { a.manager.Stop(); return a.manager.Snapshot() }
 func (a *App) SetSystemProxy(enabled bool)       { a.manager.SetSystemProxy(enabled) }
 func (a *App) CheckProxy(p client.Profile) error { return client.CheckProxy(a.ctx, p) }
 func (a *App) CheckInternet()                    { go a.manager.CheckInternet() }

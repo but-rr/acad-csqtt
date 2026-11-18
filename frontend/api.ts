@@ -1,6 +1,6 @@
-import type { Initial, Profile } from './types';
+import type { Initial, Profile, State } from './types';
 interface Backend {
- Initial():Promise<Initial>;SetDraft(p:Profile,remember:boolean):Promise<void>;SaveProfile(p:Profile,remember:boolean):Promise<void>;Connect():Promise<void>;Disconnect():Promise<void>;
+ Initial():Promise<Initial>;SetDraft(p:Profile,remember:boolean):Promise<void>;SaveProfile(p:Profile,remember:boolean):Promise<void>;Connect():Promise<State>;Disconnect():Promise<State>;
  SetSystemProxy(enabled:boolean):Promise<void>;CheckProxy(p:Profile):Promise<void>;CheckInternet():Promise<void>;CheckUpdates():Promise<void>;OpenUpdate():Promise<void>;ExportLog():Promise<void>;HideToTray():Promise<void>;Quit():Promise<void>;
 }
 declare global{interface Window{go?:{main?:{App?:Backend}}}}
