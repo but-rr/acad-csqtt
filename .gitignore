@@ -17,3 +17,7 @@ bin/
 packet-proxy/*.exe
 ui-preview.png
 /GIT-RELEASE-LOCAL.md
+/frontend/node_modules/
+/frontend/dist/
+/frontend/wailsjs/
+/CSQTT.exe

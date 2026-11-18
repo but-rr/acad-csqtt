@@ -1,56 +1,54 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
-Set-Location $projectRoot
-
+Set-Location -LiteralPath $projectRoot
 $version = (Get-Content -LiteralPath VERSION -Raw).Trim()
-if ($version -notmatch '^\d+\.\d+\.\d+$') { throw 'VERSION must contain a version such as 1.1.0' }
-if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -ne "v$version") {
-    throw "Tag $env:GITHUB_REF_NAME does not match VERSION ($version)"
+if ($version -notmatch '^\d+\.\d+\.\d+$') { throw 'Invalid VERSION' }
+if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -ne "v$version") { throw 'Tag must match VERSION' }
+if ((Get-Content -LiteralPath wails.json -Raw | ConvertFrom-Json).info.productVersion -ne $version) { throw 'Version mismatch' }
+if (Test-Path '.tools/cargo/bin/cargo.exe') {
+ $env:CARGO_HOME = Join-Path $projectRoot '.tools/cargo'
+ $env:RUSTUP_HOME = Join-Path $projectRoot '.tools/rustup'
+ $env:PATH = "$env:CARGO_HOME\bin;$env:PATH"
 }
-$archiveName = "CSQTT-v$version-Win10-x64.zip"
-
-if (Test-Path '.tools\cargo\bin\cargo.exe') {
-    $env:CARGO_HOME = Join-Path $projectRoot '.tools\cargo'
-    $env:RUSTUP_HOME = Join-Path $projectRoot '.tools\rustup'
-    $env:PATH = "$env:CARGO_HOME\bin;$env:PATH"
-}
-$goExe = if (Get-Command go -ErrorAction SilentlyContinue) { 'go' } elseif (Test-Path 'C:\Go\bin\go.exe') { 'C:\Go\bin\go.exe' } else { throw 'Install Go first.' }
-
-& cargo build --release --locked --manifest-path core\rust-client\Cargo.toml
-if ($LASTEXITCODE -ne 0) { throw 'CSQTT build failed' }
-New-Item -ItemType Directory -Path bin -Force | Out-Null
-& python scripts\prepare_wintun.py
+& cargo build --release --locked --manifest-path core/rust-client/Cargo.toml
+if ($LASTEXITCODE -ne 0) { throw 'Core build failed' }
+New-Item -ItemType Directory -Force bin,build/windows,.tools/bin | Out-Null
+& go run scripts/package.go wintun
 if ($LASTEXITCODE -ne 0) { throw 'Wintun preparation failed' }
-Copy-Item -LiteralPath core\rust-client\target\release\client.exe -Destination bin\csqtt-core.exe -Force
-Push-Location packet-proxy
+Copy-Item -LiteralPath core/rust-client/target/release/client.exe -Destination bin/csqtt-core.exe -Force
+& go -C packet-proxy build -trimpath -ldflags '-s -w' -o ../bin/packet-proxy.exe .
+if ($LASTEXITCODE -ne 0) { throw 'Packet helper build failed' }
+Copy-Item -LiteralPath assets/icons/CS_logo.png -Destination build/appicon.png -Force
+Copy-Item -LiteralPath assets/icons/CSQTT.ico -Destination build/windows/icon.ico -Force
+$wails = Join-Path $projectRoot '.tools/bin/wails.exe'
+if (-not (Test-Path -LiteralPath $wails)) {
+ $previousGoBin = $env:GOBIN
+ try { $env:GOBIN = Split-Path -Parent $wails; & go install github.com/wailsapp/wails/v2/cmd/wails@v2.16.0; if ($LASTEXITCODE -ne 0) { throw 'Wails install failed' } }
+ finally { $env:GOBIN = $previousGoBin }
+}
+Push-Location frontend
 try {
-    & $goExe build -trimpath -ldflags '-s -w' -o ..\bin\packet-proxy.exe .
-    if ($LASTEXITCODE -ne 0) { throw 'Packet proxy build failed' }
+ if (-not (Test-Path node_modules)) { & npm.cmd ci --no-audit --no-fund; if ($LASTEXITCODE -ne 0) { throw 'Frontend install failed' } }
+ & npm.cmd run build
+ if ($LASTEXITCODE -ne 0) { throw 'Frontend build failed' }
 } finally { Pop-Location }
-$packageDir = Join-Path $projectRoot 'dist\CSQTT'
+& $wails build -s -skipbindings -trimpath -platform windows/amd64 -webview2 embed
+if ($LASTEXITCODE -ne 0) { throw 'Wails build failed' }
+$packageDir = Join-Path $projectRoot 'dist/CSQTT'
 if (Test-Path -LiteralPath $packageDir) {
-    $resolvedPackageDir = (Resolve-Path -LiteralPath $packageDir).Path
-    if (-not $resolvedPackageDir.StartsWith($projectRoot + '\', [StringComparison]::OrdinalIgnoreCase)) { throw 'Package directory must stay inside workspace' }
-    Get-ChildItem -LiteralPath $resolvedPackageDir -Recurse -File | ForEach-Object { $_.IsReadOnly = $false }
+ $resolvedPackage = (Resolve-Path -LiteralPath $packageDir).Path
+ if (-not $resolvedPackage.StartsWith($projectRoot + '\', [StringComparison]::OrdinalIgnoreCase)) { throw 'Package must stay inside workspace' }
+ Remove-Item -LiteralPath $resolvedPackage -Recurse -Force
 }
-& python scripts\prepare_icon.py
-if ($LASTEXITCODE -ne 0) { throw 'Icon preparation failed' }
-& python -m PyInstaller --noconfirm --onedir --windowed --name CSQTT --icon assets\icons\CSQTT.ico main.py
-if ($LASTEXITCODE -ne 0) { throw 'GUI build failed' }
-Copy-Item -LiteralPath bin -Destination $packageDir -Recurse -Force
-Copy-Item -LiteralPath "$packageDir\_internal\VCRUNTIME140.dll" -Destination "$packageDir\bin\VCRUNTIME140.dll" -Force
-Copy-Item -LiteralPath VERSION -Destination "$packageDir\_internal" -Force
-Copy-Item -LiteralPath assets -Destination $packageDir -Recurse -Force
-& python scripts\collect_licenses.py $packageDir
-if ($LASTEXITCODE -ne 0) { throw 'License collection failed' }
-$smoke = Start-Process -FilePath (Join-Path $packageDir 'CSQTT.exe') -ArgumentList '--smoke' -WindowStyle Hidden -PassThru
-if (-not $smoke.WaitForExit(15000)) {
-    $smoke.Kill()
-    throw 'Packaged GUI did not exit within 15 seconds'
-}
-if ($smoke.ExitCode -ne 0) { throw "Packaged GUI failed: $($smoke.ExitCode)" }
-& python -c "import pathlib,sys,zipfile; p=pathlib.Path(sys.argv[1]); z=zipfile.ZipFile(sys.argv[2], 'w', zipfile.ZIP_DEFLATED, strict_timestamps=False); [z.write(f, f.relative_to(p)) for f in p.rglob('*') if f.is_file()]; z.close(); z=zipfile.ZipFile(sys.argv[2]); names=set(z.namelist()); assert z.testzip() is None; assert {'CSQTT.exe','bin/csqtt-core.exe','bin/packet-proxy.exe','bin/wintun.dll','bin/VCRUNTIME140.dll','assets/icons/CSQTT.ico','_internal/VERSION','_internal/THIRD_PARTY_NOTICES.txt'}.issubset(names); assert not names.intersection({'LICENSE','NOTICE.md','README.md','SHA256SUMS.txt','profile.json','profile.tmp'}); assert not any(n.startswith('licenses/') for n in names)" $packageDir $archiveName
+New-Item -ItemType Directory -Force "$packageDir/bin","$packageDir/_internal" | Out-Null
+Copy-Item -LiteralPath build/bin/CSQTT.exe -Destination $packageDir -Force
+foreach ($file in @('csqtt-core.exe','packet-proxy.exe','wintun.dll')) { Copy-Item -LiteralPath "bin/$file" -Destination "$packageDir/bin" -Force }
+Copy-Item -LiteralPath "$env:SystemRoot/System32/vcruntime140.dll" -Destination "$packageDir/bin/VCRUNTIME140.dll" -Force
+Copy-Item -LiteralPath VERSION -Destination "$packageDir/_internal" -Force
+& go run scripts/package.go notices $packageDir
+if ($LASTEXITCODE -ne 0) { throw 'Notices collection failed' }
+$smoke = Start-Process -FilePath "$packageDir/CSQTT.exe" -ArgumentList '--smoke' -WindowStyle Hidden -PassThru
+if (-not $smoke.WaitForExit(15000)) { $smoke.Kill(); throw 'GUI startup timeout' }
+if ($smoke.ExitCode -ne 0) { throw 'GUI startup failed' }
+& go run scripts/package.go zip $packageDir "CSQTT-v$version-Win10-x64.zip"
 if ($LASTEXITCODE -ne 0) { throw 'ZIP packaging failed' }
-$archiveHash = (Get-FileHash -LiteralPath $archiveName -Algorithm SHA256).Hash.ToLowerInvariant()
-"$archiveHash  $archiveName" | Set-Content -LiteralPath "$archiveName.sha256" -Encoding ASCII
-Write-Output "Built $archiveName and $archiveName.sha256"
