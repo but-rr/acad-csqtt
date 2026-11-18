@@ -14,7 +14,7 @@ from csqtt_client.platform.windows import profiles
 from csqtt_client.services import updates
 
 
-def release(version="1.3.4"):
+def release(version="1.4.1"):
     filename = f"CSQTT-v{version}-Win10-x64.zip"
     return {"tag_name": f"v{version}", "assets": [{"name": filename, "state": "uploaded",
             "browser_download_url": f"https://github.com/but-rr/acad-csqtt/releases/download/v{version}/{filename}"}]}
@@ -71,7 +71,7 @@ class UpdateTests(unittest.TestCase):
             conn.getresponse.return_value.status = 200
             conn.getresponse.return_value.read.return_value = json.dumps(release()).encode()
             result = updates.fetch_update(profile)
-            self.assertEqual(result.version, "1.3.4")
+            self.assertEqual(result.version, "1.4.1")
             self.assertEqual(factory.call_args.args, ("10.0.0.1", 3128))
             token = base64.b64encode(b"test-user:test-secret").decode()
             conn.set_tunnel.assert_called_with("api.github.com", 443, headers={"Proxy-Authorization": f"Basic {token}"})
@@ -98,7 +98,7 @@ class UpdateTests(unittest.TestCase):
                 client.check_updates()
                 client.poll()
             self.assertEqual(client.ui.update_banner.winfo_manager(), "pack")
-            self.assertIn("1.3.4", client.ui.update_message.cget("text"))
+            self.assertIn("1.4.1", client.ui.update_message.cget("text"))
             with patch.object(app.webbrowser, "open") as browser:
                 client.download_update()
                 browser.assert_called_once_with(expected.download_url)

@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"os"
 	"strings"
 	"time"
 
@@ -21,16 +22,62 @@ import (
 
 type dialer func(context.Context, string, string) (net.Conn, error)
 
+var bypassUpdates = make(chan netip.Addr, 128)
+
 func main() {
-	core := flag.String("core", "127.0.0.1:9000", "Local CSQTT IP packet socket")
+	core := flag.String("core", "127.0.0.1:9000", "Local CSQTT packet socket")
 	ip := flag.String("ip", "", "IPv4 assigned by TUNCONF")
 	dns := flag.String("dns", "1.1.1.1", "Tunnel DNS IPv4, comma separated")
 	socks := flag.String("socks", "127.0.0.1:1080", "SOCKS5 listener")
 	web := flag.String("http", "127.0.0.1:8080", "HTTP proxy listener")
+	mode := flag.String("mode", "proxy", "proxy or tun")
+	bypass := flag.String("bypass-ip", "", "Physical IPv4 destinations outside TUN")
+	parent := flag.Int("parent-pid", 0, "Parent GUI process")
+	systemProxy := flag.Bool("system-proxy", false, "Set Windows system proxy after readiness")
+	recoverTUN := flag.Bool("recover-tun", false, "Recover an interrupted TUN session")
+	recoverProxy := flag.Bool("recover-proxy", false, "Restore an orphaned Windows proxy")
 	flag.Parse()
+	if *recoverProxy {
+		if err := recoverProxyState(); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
+	if *recoverTUN {
+		if _, err := recoverTunState(); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	controller := newProxyController(*web, *systemProxy)
+	defer controller.restore()
+	go watchCommands(cancel, controller)
+	go watchParentProcess(uint32(*parent), cancel)
+	ready := func(dial dialer) error { return runProxies(ctx, cancel, *socks, *web, dial, controller) }
+	var err error
+	if *mode == "tun" {
+		err = runTunMode(ctx, *core, *ip, *dns, *bypass, func() error {
+			d := &net.Dialer{Timeout: 25 * time.Second}
+			return ready(d.DialContext)
+		})
+	} else if *mode == "proxy" {
+		err = runProxyMode(ctx, cancel, core, ip, dns, socks, web, ready)
+	} else {
+		err = fmt.Errorf("unknown mode %q", *mode)
+	}
+	if err != nil {
+		log.Print(err)
+		controller.restore()
+		os.Exit(1)
+	}
+}
+
+func runProxyMode(ctx context.Context, cancel context.CancelFunc, core, ip, dns, socks, web *string, ready func(dialer) error) error {
 	localIP, err := netip.ParseAddr(*ip)
 	if err != nil || !localIP.Is4() {
-		log.Fatal("--ip must be an IPv4 assigned by CSQTT")
+		return fmt.Errorf("packet proxy: %v", "--ip must be an IPv4 assigned by CSQTT")
 	}
 	var servers []netip.Addr
 	for _, value := range strings.Split(*dns, ",") {
@@ -40,37 +87,43 @@ func main() {
 		}
 	}
 	if len(servers) == 0 {
-		log.Fatal("No valid tunnel DNS IPv4")
+		return fmt.Errorf("packet proxy: %v", "No valid tunnel DNS IPv4")
 	}
 	if err := loopback(*core); err != nil {
-		log.Fatal(err)
+		return fmt.Errorf("packet proxy: %v", err)
 	}
 	if err := loopback(*socks); err != nil {
-		log.Fatal(err)
+		return fmt.Errorf("packet proxy: %v", err)
 	}
 	if err := loopback(*web); err != nil {
-		log.Fatal(err)
+		return fmt.Errorf("packet proxy: %v", err)
 	}
 	dev, network, err := netstack.CreateNetTUN([]netip.Addr{localIP}, servers, 1280)
 	if err != nil {
-		log.Fatal(err)
+		return fmt.Errorf("packet proxy: %v", err)
 	}
 	address, _ := net.ResolveUDPAddr("udp4", *core)
 	wire, err := net.DialUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)}, address)
 	if err != nil {
-		log.Fatal(err)
+		return fmt.Errorf("packet proxy: %v", err)
 	}
+	defer dev.Close()
+	defer wire.Close()
 	go func() {
 		buffers := [][]byte{make([]byte, 65535)}
 		sizes := make([]int, 1)
 		for {
 			count, err := dev.Read(buffers, sizes, 0)
 			if err != nil {
-				log.Fatal("Packet stack read: ", err)
+				log.Print("Packet stack read: ", err)
+				cancel()
+				return
 			}
 			for i := 0; i < count; i++ {
 				if _, err := wire.Write(buffers[i][:sizes[i]]); err != nil {
-					log.Fatal(err)
+					log.Print(err)
+					cancel()
+					return
 				}
 			}
 		}
@@ -85,28 +138,84 @@ func main() {
 				continue
 			}
 			if _, err := dev.Write([][]byte{buffer[:size]}, 0); err != nil {
-				log.Fatal(err)
+				log.Print(err)
+				cancel()
+				return
 			}
 		}
 	}()
-	listener, err := net.Listen("tcp4", *socks)
-	if err != nil {
-		log.Fatal(err)
+
+	if err := ready(network.DialContext); err != nil {
+		return err
 	}
-	httpListener, err := net.Listen("tcp4", *web)
-	if err != nil {
-		log.Fatal(err)
+	<-ctx.Done()
+	return nil
+}
+
+func runProxies(ctx context.Context, cancel context.CancelFunc, socks, web string, dial dialer, controller *proxyController) error {
+	if err := loopback(socks); err != nil {
+		return err
 	}
-	dial := dialer(network.DialContext)
-	go func() { log.Fatal(http.Serve(httpListener, proxyHandler(dial))) }()
-	fmt.Printf("PROXY_READY SOCKS5=%s HTTP=%s\n", *socks, *web)
-	for {
-		conn, err := listener.Accept()
-		if err != nil {
-			log.Fatal(err)
+	if err := loopback(web); err != nil {
+		return err
+	}
+	listener, err := net.Listen("tcp4", socks)
+	if err != nil {
+		return err
+	}
+	httpListener, err := net.Listen("tcp4", web)
+	if err != nil {
+		listener.Close()
+		return err
+	}
+	go func() { <-ctx.Done(); listener.Close(); httpListener.Close() }()
+	go func() {
+		if err := http.Serve(httpListener, proxyHandler(dial)); err != nil && ctx.Err() == nil {
+			log.Print(err)
+			cancel()
 		}
-		go serveSOCKS(conn, dial)
+	}()
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				if ctx.Err() == nil {
+					cancel()
+				}
+				return
+			}
+			go serveSOCKS(conn, dial)
+		}
+	}()
+	if err := controller.setReady(); err != nil {
+		cancel()
+		return err
 	}
+	fmt.Printf("PROXY_READY SOCKS5=%s HTTP=%s\n", socks, web)
+	return nil
+}
+
+func watchCommands(cancel context.CancelFunc, controller *proxyController) {
+	scanner := bufio.NewScanner(os.Stdin)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if strings.HasPrefix(line, "BYPASS ") {
+			if address, err := netip.ParseAddr(strings.TrimPrefix(line, "BYPASS ")); err == nil && address.Is4() {
+				bypassUpdates <- address
+			}
+			continue
+		}
+		switch line {
+		case "STOP":
+			cancel()
+			return
+		case "SYSTEM_PROXY_ON", "SYSTEM_PROXY_OFF":
+			if err := controller.setEnabled(line == "SYSTEM_PROXY_ON"); err != nil {
+				fmt.Printf("SYSTEM_PROXY_ERROR %v\n", err)
+			}
+		}
+	}
+	cancel() // A dead GUI closes the pipe even if the parent handle cannot be opened.
 }
 
 func loopback(value string) error {

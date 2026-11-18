@@ -15,9 +15,10 @@ def core_command(profile, packet_port):
     env = os.environ.copy()
     # Ignore inherited bypasses and proxy credentials. The core uses this explicit proxy.
     for key in list(env):
-        if key.upper() in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY"):
+        if key.upper() in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "CSQTT_HTTP_PROXY", "CSQTT_PROXY_USER", "CSQTT_PROXY_PASSWORD"):
             del env[key]
-    env.update(CSQTT_PASSWORD=profile.password, CSQTT_HTTP_PROXY=profile.proxy.strip(),
-               CSQTT_PROXY_USER=profile.proxy_user, CSQTT_PROXY_PASSWORD=profile.proxy_password,
-               CSQTT_EVENTS="1")
+    env.update(CSQTT_PASSWORD=profile.password, CSQTT_EVENTS="1")
+    if profile.internet_mode == "proxy":
+        env.update(CSQTT_HTTP_PROXY=profile.proxy.strip(), CSQTT_PROXY_USER=profile.proxy_user,
+                   CSQTT_PROXY_PASSWORD=profile.proxy_password)
     return args, env

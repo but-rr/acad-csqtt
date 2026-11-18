@@ -46,6 +46,8 @@ def fetch_update(profile, *, local_port=None):
     tunnel_headers = {}
     if local_port is not None:
         host, port = "127.0.0.1", local_port
+    elif profile.internet_mode == "direct":
+        host, port = "api.github.com", 443
     else:
         host, port = split_address(profile.proxy)
         ipaddress.ip_address(host)
@@ -54,7 +56,8 @@ def fetch_update(profile, *, local_port=None):
             tunnel_headers["Proxy-Authorization"] = f"Basic {token}"
     connection = http.client.HTTPSConnection(host, port, timeout=8, context=ssl.create_default_context())
     try:
-        connection.set_tunnel("api.github.com", 443, headers=tunnel_headers)
+        if local_port is not None or profile.internet_mode == "proxy":
+            connection.set_tunnel("api.github.com", 443, headers=tunnel_headers)
         connection.request("GET", API_PATH, headers={
             "Accept": "application/vnd.github+json",
             "User-Agent": f"CSQTT/{APP_VERSION}",

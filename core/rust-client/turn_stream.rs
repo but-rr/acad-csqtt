@@ -61,6 +61,9 @@ pub async fn connect(
         if endpoint.port != 443 { bail!("Proxy mode only permits TURN port 443"); }
         crate::http_proxy::connect(&endpoint.socket_authority()).await?
     } else {
+        if server.is_ipv4() && std::env::var_os("CSQTT_EVENTS").is_some() {
+            crate::log_output!("TUN_BYPASS:{}", server.ip());
+        }
         timeout(STREAM_CONNECT_TIMEOUT, TcpStream::connect(server))
             .await.context("TURN TCP connect timed out")?
             .with_context(|| format!("TURN {} connect {server}", endpoint.transport.as_str()))?

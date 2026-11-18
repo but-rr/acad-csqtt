@@ -21,6 +21,8 @@ def main():
     if smoke:
         root.after(700, ui.close)
     else:
+        if "--connect" in sys.argv:
+            root.after(800, ui.start)
         def check_updates():
             ui.check_updates(automatic=True)
             root.after(6 * 60 * 60 * 1000, check_updates)
