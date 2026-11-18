@@ -14,6 +14,7 @@ from csqtt_client.ui.widgets import Panel, ScrollPage, label, frame
 class DesktopUI:
     def __init__(self, app, root, profile, version, directory):
         self.app, self.root = app, root
+        self.app_version = version
         self.page = None
         self.images = []
         self.entries = {}
@@ -72,6 +73,11 @@ class DesktopUI:
         self.subtitle.pack(anchor="w", pady=(5, 0))
         self.badge = label(header, "●  Отключено", color=DIM, size=10)
         self.badge.pack(side="right", padx=(12, 0))
+
+        self.update_banner = Panel(main, padding=10, radius=12)
+        self.update_message = label(self.update_banner.body, "", color=MINT, size=10)
+        self.update_message.pack(side="left", padx=5, pady=6)
+        ttk.Button(self.update_banner.body, text="Обновить", command=app.download_update).pack(side="right")
 
         stats = frame(main)
         stats.pack(fill="x", pady=(0, 16))
@@ -305,8 +311,11 @@ class DesktopUI:
             ttk.Button(row, text="Копировать", command=lambda k=key, t=kind: self.copy_endpoint(k, t)).pack(side="right")
             self.app.vars[key].trace_add("write", lambda *args: self.update_endpoints())
         self.update_endpoints()
-        remember = ttk.Checkbutton(body, text="Запомнить профиль на этом компьютере", variable=self.app.remember)
+        remember = frame(body)
         remember.grid(row=1, column=0, columnspan=2, sticky="w", pady=(12, 0))
+        ttk.Checkbutton(remember, text="Сохранять настройки рядом с программой", variable=self.app.remember).pack(anchor="w")
+        self.profile_feedback = label(remember, "Пароли и хеши сохраняются в profile.json открытым текстом.", size=8, color=DIM)
+        self.profile_feedback.pack(anchor="w", padx=4, pady=(3, 0))
         self.adapt_columns(body, server, side, "connection", remember)
 
     def settings_page(self):
@@ -331,7 +340,20 @@ class DesktopUI:
         session.pack(fill="x", pady=(14, 0))
         self.field(session.body, "Поколение", "generation")
         self.field(session.body, "Salt", "salt", secret=True)
+        updates = self.section(right, "Обновления")
+        updates.pack(fill="x", pady=(14, 0))
+        self.update_feedback = label(updates.body, f"Установлена версия v{self.app_version}", size=9, color=MUTED,
+                                     wraplength=420, justify="left")
+        self.update_feedback.pack(fill="x", pady=(4, 10))
+        self.update_feedback.bind("<Configure>", lambda e: self.update_feedback.configure(wraplength=max(150, e.width)))
+        self.update_check_button = ttk.Button(updates.body, text="Проверить обновления", command=self.app.check_updates)
+        self.update_check_button.pack(anchor="w")
         self.adapt_columns(body, transport, right, "settings")
+
+    def show_update(self, version):
+        self.update_message.configure(text=f"Доступна новая версия v{version}")
+        self.update_feedback.configure(text=f"Доступна версия v{version}. Кнопка «Обновить» откроет скачивание ZIP.")
+        self.update_banner.pack(fill="x", pady=(0, 14), before=self.pages)
 
     def adapt_columns(self, body, left, right, group, remember=None):
         previous = None

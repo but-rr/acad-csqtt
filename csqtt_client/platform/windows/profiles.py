@@ -1,10 +1,10 @@
-"""Per-user encrypted profile storage and migration."""
+"""Portable profile storage, with import of earlier Windows DPAPI profiles."""
 import ctypes
 from ctypes import wintypes
 from dataclasses import asdict
 import json
 
-from csqtt_client.config import PROFILE, LEGACY_PROFILE
+from csqtt_client.config import PROFILE, LEGACY_PROFILES
 from csqtt_client.models.profile import Profile
 
 
@@ -36,23 +36,31 @@ def dpapi(value: bytes, decrypt=False):
 def save_profile(profile):
     PROFILE.parent.mkdir(parents=True, exist_ok=True)
     temp = PROFILE.with_suffix(".tmp")
-    temp.write_bytes(dpapi(json.dumps(asdict(profile), ensure_ascii=False).encode("utf-8")))
-    temp.replace(PROFILE)
-    LEGACY_PROFILE.unlink(missing_ok=True)
+    try:
+        temp.write_text(json.dumps(asdict(profile), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        temp.replace(PROFILE)
+    finally:
+        temp.unlink(missing_ok=True)
 
 
 def load_profile():
-    source = PROFILE if PROFILE.exists() else LEGACY_PROFILE
-    if not source.exists():
-        return Profile()
-    data = json.loads(dpapi(source.read_bytes(), decrypt=True))
+    if PROFILE.exists():
+        data = json.loads(PROFILE.read_text(encoding="utf-8-sig"))
+    else:
+        source = next((path for path in LEGACY_PROFILES if path.exists()), None)
+        if source is None:
+            return Profile()
+        data = json.loads(dpapi(source.read_bytes(), decrypt=True))
+    if not isinstance(data, dict) or any(not isinstance(v, str) for k, v in data.items() if k in Profile.__dataclass_fields__):
+        raise ValueError("Неверный формат profile.json.")
     return Profile(**{k: v for k, v in data.items() if k in Profile.__dataclass_fields__})
 
 
 def profile_exists():
-    return PROFILE.exists() or LEGACY_PROFILE.exists()
+    return PROFILE.exists() or any(path.exists() for path in LEGACY_PROFILES)
 
 
 def delete_profile():
     PROFILE.unlink(missing_ok=True)
-    LEGACY_PROFILE.unlink(missing_ok=True)
+    for path in LEGACY_PROFILES:
+        path.unlink(missing_ok=True)

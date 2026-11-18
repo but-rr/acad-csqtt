@@ -16,11 +16,11 @@ native Windows launcher, DPAPI profile storage, and local SOCKS5/HTTP proxies.
 The packet proxy uses the WireGuard Go netstack package (MIT) and gVisor
 (Apache 2.0); it does not establish a WireGuard connection.
 The GUI is packaged with Python, Tcl/Tk and PyInstaller.
-Third-party copyright and license texts are provided in licenses/.
+Third-party copyright and license texts are provided in _internal/THIRD_PARTY_NOTICES.txt.
 
 The UI includes Nunito Sans, Copyright 2016 The Nunito Sans Project Authors,
 under the SIL Open Font License 1.1, provided in assets/fonts/OFL.txt.
 
 No proxy passwords, CSQTT server credentials or personal profiles are included
-in the portable archive. Saved profiles reside outside this distribution in
-the current Windows user's LocalAppData directory.
+in the release archive. The application creates profile.json beside its EXE
+when saving is enabled. This portable file contains unencrypted credentials.

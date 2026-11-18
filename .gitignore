@@ -10,6 +10,8 @@ portable/
 *.zip
 *.zip.sha256
 settings.json
+/profile.json
+/profile.tmp
 *.log
 bin/
 packet-proxy/*.exe

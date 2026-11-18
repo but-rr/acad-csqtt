@@ -12,6 +12,7 @@ import subprocess
 import threading
 import time
 import tkinter as tk
+import webbrowser
 from tkinter import filedialog, messagebox
 
 from csqtt_client.config import APP_VERSION, ROOT, NO_WINDOW
@@ -19,11 +20,17 @@ from csqtt_client.models.profile import Profile
 from csqtt_client.platform.windows.profiles import load_profile, save_profile, delete_profile, profile_exists
 from csqtt_client.services.proxy import proxy_connect
 from csqtt_client.services.tunnel import core_command
+from csqtt_client.services.updates import fetch_update
 
 
 class App:
-    def __init__(self, root):
+    def __init__(self, root, *, persist=True):
         self.root = root
+        self.persist = persist
+        self.save_pending = None
+        self.profile_load_failed = False
+        self.update_checking = False
+        self.available_update = None
         self.events = queue.Queue()
         self.core = self.helper = None
         self.session = 0
@@ -38,11 +45,21 @@ class App:
             profile = load_profile()
         except Exception:
             profile = Profile()
+            self.profile_load_failed = True
         self.vars = {k: tk.StringVar(value=str(v)) for k, v in asdict(profile).items()}
-        self.remember = tk.BooleanVar(value=profile_exists())
+        self.remember = tk.BooleanVar(value=True)
         self.status = tk.StringVar(value="Укажите сервер и прокси, затем нажмите «Подключить».")
         from csqtt_client.ui.desktop import DesktopUI
         self.ui = DesktopUI(self, root, profile, APP_VERSION, ROOT)
+        for variable in self.vars.values():
+            variable.trace_add("write", self.schedule_save)
+        self.hashes.edit_modified(False)
+        self.hashes.bind("<<Modified>>", self.hashes_changed, add="+")
+        self.remember.trace_add("write", self.remember_changed)
+        if self.profile_load_failed:
+            self.ui.profile_feedback.configure(text="Не удалось прочитать профиль. Исходный файл не перезаписан.", fg="#df9499")
+        elif profile_exists() and self.persist:
+            self.schedule_save()
         self.log.bind("<Control-a>", self.select_log)
         self.log.bind("<Control-A>", self.select_log)
         self.log.bind("<Control-c>", lambda event: self.copy_log(selected=True))
@@ -65,6 +82,7 @@ class App:
     def hide_to_tray(self):
         if self.closing:
             return
+        self.flush_profile()
         if self.tray and self.tray.ready.is_set():
             self.root.withdraw()
         elif self.tray:
@@ -129,6 +147,61 @@ class App:
     def profile(self):
         return Profile(**{**{k: v.get() for k, v in self.vars.items()}, "hashes": self.hashes.get("1.0", "end").strip()})
 
+    def hashes_changed(self, event=None):
+        if self.hashes.edit_modified():
+            self.hashes.edit_modified(False)
+            self.schedule_save()
+
+    def schedule_save(self, *args):
+        if not self.persist or self.closing:
+            return
+        self.profile_load_failed = False
+        if self.save_pending:
+            self.root.after_cancel(self.save_pending)
+        self.save_pending = self.root.after(500, self.flush_profile)
+
+    def remember_changed(self, *args):
+        self.profile_load_failed = False
+        self.flush_profile()
+
+    def flush_profile(self):
+        if self.save_pending:
+            self.root.after_cancel(self.save_pending)
+            self.save_pending = None
+        if not self.persist or self.profile_load_failed:
+            return
+        try:
+            if self.remember.get():
+                save_profile(self.profile())
+                text = "Сохранено в profile.json · файл содержит пароли и хеши."
+            else:
+                delete_profile()
+                text = "Сохранение выключено. Сохранённый профиль удалён."
+            self.ui.profile_feedback.configure(text=text, fg="#81848e")
+        except OSError:
+            self.ui.profile_feedback.configure(text="Не удалось сохранить профиль. Нужен доступ к записи в папку программы.", fg="#df9499")
+
+    def check_updates(self, automatic=False):
+        if self.update_checking or self.closing:
+            return
+        self.update_checking = True
+        self.ui.update_check_button.configure(state="disabled")
+        if not automatic:
+            self.ui.update_feedback.configure(text="Проверяю обновления…")
+        profile = self.running_profile if self.helper and self.running_profile else self.profile()
+        local_port = int(profile.http_port) if self.helper and self.running_profile else None
+        def work():
+            try:
+                result = fetch_update(profile, local_port=local_port)
+                self.events.put(("update_result", (automatic, result, False)))
+            except Exception:
+                self.events.put(("update_result", (automatic, None, True)))
+        self.background(work)
+
+    def download_update(self):
+        if self.available_update:
+            webbrowser.open(self.available_update.download_url)
+
     def append(self, message):
         # Core messages can contain partial hashes; mask these as well as passwords.
         for value in self.secrets:
@@ -180,10 +253,7 @@ class App:
                 check.bind(("127.0.0.1", 0))
                 self.packet_port = check.getsockname()[1]
             args, env = core_command(profile, self.packet_port)
-            if self.remember.get():
-                save_profile(profile)
-            else:
-                delete_profile()
+            self.flush_profile()
             self.session += 1
             self.ready = False
             self.config = None
@@ -328,6 +398,7 @@ class App:
     def close(self):
         if self.closing:
             return
+        self.flush_profile()
         self.closing = True
         self.root.withdraw()
         self.stop()
@@ -361,6 +432,18 @@ class App:
                     self.ui.set_state("online" if succeeded else "unconfirmed")
                     self.append(result)
                     self.test_button.configure(state="normal")
+                    if succeeded:
+                        self.check_updates(automatic=True)
+            elif kind == "update_result":
+                automatic, update, failed = value
+                self.update_checking = False
+                self.ui.update_check_button.configure(state="normal")
+                if update:
+                    self.available_update = update
+                    self.ui.show_update(update.version)
+                elif not automatic:
+                    self.ui.update_feedback.configure(text="Не удалось проверить обновления. Проверьте доступ к GitHub через прокси." if failed
+                                                      else f"Установлена актуальная версия v{APP_VERSION}.")
             elif kind == "cleaned":
                 self.stopping = False
                 if self.closing:

@@ -1,4 +1,4 @@
-"""Include license texts from the exact local dependency source caches."""
+"""Collect required notices into one file inside the runtime directory."""
 import json
 import importlib.metadata
 import os
@@ -8,22 +8,30 @@ import subprocess
 import sys
 
 root = Path(__file__).resolve().parents[1]
-destination = Path(sys.argv[1]) / "licenses"
-destination.mkdir(parents=True, exist_ok=True)
+destination = Path(sys.argv[1]) / "_internal/THIRD_PARTY_NOTICES.txt"
+notices = []
+
+
+def include_file(path, name):
+    data = path.read_bytes()
+    try:
+        text = data.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        text = data.decode("latin-1")
+    notices.append(f"\n{'=' * 72}\n{name}/{path.name}\n{'=' * 72}\n\n{text.rstrip()}\n")
 
 
 def copy_notices(source, name):
     if not source.is_dir():
         return
-    target = destination / name
     for path in source.iterdir():
         if path.is_file() and path.name.upper().startswith(("LICENSE", "LICENCE", "COPYING", "NOTICE", "AUTHORS", "COPYRIGHT")):
-            target.mkdir(parents=True, exist_ok=True)
-            copied = target / path.name
-            shutil.copy2(path, copied)
-            copied.chmod(0o644)
+            include_file(path, name)
 
 
+include_file(root / "LICENSE", "CSQTT")
+include_file(root / "NOTICE.md", "CSQTT")
+include_file(root / "assets/fonts/OFL.txt", "Nunito Sans")
 copy_notices(Path(sys.base_prefix), "Python")
 for distribution in ("pyinstaller", "pystray", "Pillow", "six"):
     for item in importlib.metadata.files(distribution) or []:
@@ -48,4 +56,5 @@ while modules.strip():
     modules = modules.lstrip()[end:]
     if "Dir" in module:
         copy_notices(Path(module["Dir"]), "go-" + module["Path"].replace("/", "_") + "-" + module.get("Version", "local"))
-print("Dependency notices collected.")
+destination.write_text("CSQTT — third-party licenses and notices\n" + "".join(notices), encoding="utf-8")
+print("Dependency notices collected in _internal/THIRD_PARTY_NOTICES.txt.")

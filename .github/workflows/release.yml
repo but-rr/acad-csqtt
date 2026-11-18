@@ -76,3 +76,5 @@ jobs:
             gh release create $tag $archive "$archive.sha256" --verify-tag --title "CSQTT $tag" --notes-file RELEASE_NOTES.md --latest --repo $env:GITHUB_REPOSITORY
           }
           if ($LASTEXITCODE -ne 0) { throw 'Release upload failed' }
+          gh release edit $tag --draft=false --latest --title "CSQTT $tag" --notes-file RELEASE_NOTES.md --repo $env:GITHUB_REPOSITORY
+          if ($LASTEXITCODE -ne 0) { throw 'Release publication failed' }

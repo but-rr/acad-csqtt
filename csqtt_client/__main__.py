@@ -14,11 +14,17 @@ def main():
     if sys.platform == "win32":
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("CSQTT.Desktop")
     root = tk.Tk()
-    ui = App(root)
+    smoke = "--smoke" in sys.argv
+    ui = App(root, persist=not smoke)
     if sys.platform == "win32":
         ui.start_tray()
-    if "--smoke" in sys.argv:
+    if smoke:
         root.after(700, ui.close)
+    else:
+        def check_updates():
+            ui.check_updates(automatic=True)
+            root.after(6 * 60 * 60 * 1000, check_updates)
+        root.after(1500, check_updates)
     root.mainloop()
 
 

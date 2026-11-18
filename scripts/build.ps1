@@ -37,7 +37,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Icon preparation failed' }
 if ($LASTEXITCODE -ne 0) { throw 'GUI build failed' }
 Copy-Item -LiteralPath bin -Destination $packageDir -Recurse -Force
 Copy-Item -LiteralPath "$packageDir\_internal\VCRUNTIME140.dll" -Destination "$packageDir\bin\VCRUNTIME140.dll" -Force
-Copy-Item -LiteralPath README.md,LICENSE,NOTICE.md,VERSION -Destination $packageDir -Force
+Copy-Item -LiteralPath VERSION -Destination "$packageDir\_internal" -Force
 Copy-Item -LiteralPath assets -Destination $packageDir -Recurse -Force
 & python scripts\collect_licenses.py $packageDir
 if ($LASTEXITCODE -ne 0) { throw 'License collection failed' }
@@ -47,11 +47,7 @@ if (-not $smoke.WaitForExit(15000)) {
     throw 'Packaged GUI did not exit within 15 seconds'
 }
 if ($smoke.ExitCode -ne 0) { throw "Packaged GUI failed: $($smoke.ExitCode)" }
-Get-ChildItem -LiteralPath $packageDir -Recurse -File |
-    Where-Object Name -ne 'SHA256SUMS.txt' |
-    ForEach-Object { '{0}  {1}' -f (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant(), $_.FullName.Substring($packageDir.Length + 1) } |
-    Set-Content -LiteralPath (Join-Path $packageDir 'SHA256SUMS.txt') -Encoding ASCII
-& python -c "import pathlib,sys,zipfile; p=pathlib.Path(sys.argv[1]); z=zipfile.ZipFile(sys.argv[2], 'w', zipfile.ZIP_DEFLATED, strict_timestamps=False); [z.write(f, f.relative_to(p)) for f in p.rglob('*') if f.is_file()]; z.close(); z=zipfile.ZipFile(sys.argv[2]); assert z.testzip() is None; assert {'CSQTT.exe','bin/csqtt-core.exe','bin/packet-proxy.exe','bin/VCRUNTIME140.dll','assets/icons/CSQTT.ico','VERSION','SHA256SUMS.txt'}.issubset(z.namelist())" $packageDir $archiveName
+& python -c "import pathlib,sys,zipfile; p=pathlib.Path(sys.argv[1]); z=zipfile.ZipFile(sys.argv[2], 'w', zipfile.ZIP_DEFLATED, strict_timestamps=False); [z.write(f, f.relative_to(p)) for f in p.rglob('*') if f.is_file()]; z.close(); z=zipfile.ZipFile(sys.argv[2]); names=set(z.namelist()); assert z.testzip() is None; assert {'CSQTT.exe','bin/csqtt-core.exe','bin/packet-proxy.exe','bin/VCRUNTIME140.dll','assets/icons/CSQTT.ico','_internal/VERSION','_internal/THIRD_PARTY_NOTICES.txt'}.issubset(names); assert not names.intersection({'LICENSE','NOTICE.md','README.md','SHA256SUMS.txt','profile.json','profile.tmp'}); assert not any(n.startswith('licenses/') for n in names)" $packageDir $archiveName
 if ($LASTEXITCODE -ne 0) { throw 'ZIP packaging failed' }
 $archiveHash = (Get-FileHash -LiteralPath $archiveName -Algorithm SHA256).Hash.ToLowerInvariant()
 "$archiveHash  $archiveName" | Set-Content -LiteralPath "$archiveName.sha256" -Encoding ASCII

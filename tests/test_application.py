@@ -1,5 +1,5 @@
 import base64
-from dataclasses import replace
+from dataclasses import asdict, replace
 import json
 import os
 import socket
@@ -51,15 +51,15 @@ class ClientTests(unittest.TestCase):
     def test_legacy_profile_load_save_and_forget(self):
         with tempfile.TemporaryDirectory() as directory:
             legacy = app.Path(directory) / "old/profile.dat"
-            current = app.Path(directory) / "new/profile.dat"
-            with patch.object(profiles, "PROFILE", legacy), patch.object(profiles, "LEGACY_PROFILE", current):
-                profiles.save_profile(self.profile())
-            with patch.object(profiles, "PROFILE", current), patch.object(profiles, "LEGACY_PROFILE", legacy):
+            current = app.Path(directory) / "new/profile.json"
+            legacy.parent.mkdir()
+            legacy.write_bytes(profiles.dpapi(json.dumps(asdict(self.profile())).encode()))
+            with patch.object(profiles, "PROFILE", current), patch.object(profiles, "LEGACY_PROFILES", (legacy,)):
                 self.assertEqual(profiles.load_profile(), self.profile())
                 self.assertTrue(profiles.profile_exists())
                 profiles.save_profile(profiles.load_profile())
                 self.assertTrue(current.exists())
-                self.assertFalse(legacy.exists())
+                self.assertIn(self.profile().password, current.read_text(encoding="utf-8"))
                 self.assertEqual(profiles.load_profile(), self.profile())
                 profiles.delete_profile()
                 self.assertFalse(profiles.profile_exists())
@@ -126,7 +126,7 @@ class LogExportTests(unittest.TestCase):
         self.root = app.tk.Tk()
         self.root.withdraw()
         with patch.object(app, "load_profile", return_value=app.Profile()):
-            self.ui = app.App(self.root)
+            self.ui = app.App(self.root, persist=False)
         self.ui.secrets = ["test-only-password", "test-only-hash"]
         self.ui.append("Ошибка потока 18: test-only-password test-only-hash")
         self.expected = self.ui.log.get("1.0", "end-1c")
@@ -258,7 +258,7 @@ class TrayTests(unittest.TestCase):
 
         try:
             with patch.object(app, "load_profile", return_value=app.Profile()):
-                ui = app.App(root)
+                ui = app.App(root, persist=False)
             ui.start_tray()
             tray = ui.tray
             pump_until(tray.ready.is_set)
