@@ -54,6 +54,24 @@ def configure_style(root, scale, resources):
     style.layout("TCheckbutton", [("Checkbutton.padding", {"sticky": "nsew", "children": [
         ("Profile.indicator", {"side": "left", "sticky": "w"}),
         ("Checkbutton.focus", {"side": "left", "sticky": "w", "children": [("Checkbutton.label", {"sticky": "nsew"})]})]})])
+    switches = []
+    for checked in (False, True):
+        image = Image.new("RGBA", (96, 56), PANEL)
+        draw = ImageDraw.Draw(image)
+        draw.rounded_rectangle((2, 4, 94, 52), radius=24, fill="#527660" if checked else FIELD)
+        x = 70 if checked else 26
+        draw.ellipse((x-18, 10, x+18, 46), fill=TEXT if checked else MUTED)
+        photo = ImageTk.PhotoImage(image.resize((42, 25), Image.Resampling.LANCZOS), master=root)
+        resources.append(photo)
+        switches.append(photo)
+    style.element_create("Mode.switch", "image", switches[0], ("selected", switches[1]), width=52, sticky="w")
+    style.layout("Switch.TCheckbutton", [("Checkbutton.padding", {"sticky": "nsew", "children": [
+        ("Mode.switch", {"side": "left", "sticky": "w"}),
+        ("Checkbutton.focus", {"side": "left", "children": [("Checkbutton.label", {"sticky": "nsew"})]})]})])
+    style.configure("Switch.TCheckbutton", background=PANEL, foreground=TEXT, padding=5)
+    style.map("Switch.TCheckbutton", background=[("active", PANEL)], foreground=[("disabled", DIM)])
+    style.configure("Panel.TCheckbutton", background=PANEL, foreground=MUTED)
+    style.map("Panel.TCheckbutton", background=[("active", PANEL)], foreground=[("active", TEXT), ("disabled", DIM)])
     style.configure("Vertical.TScrollbar", background=LINE, troughcolor=BG, borderwidth=0,
                     lightcolor=BG, darkcolor=BG, arrowcolor=DIM, arrowsize=12)
     style.map("Vertical.TScrollbar", background=[("active", "#555860"), ("!active", LINE)],

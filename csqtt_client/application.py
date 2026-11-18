@@ -4,6 +4,7 @@ import http.client
 import ipaddress
 import json
 from pathlib import Path
+import os
 import queue
 import re
 import socket
@@ -31,6 +32,8 @@ class App:
         self.profile_load_failed = False
         self.update_checking = False
         self.available_update = None
+        self.tun_bypass_ips = []
+        self.helper_ready = False
         self.events = queue.Queue()
         self.core = self.helper = None
         self.session = 0
@@ -48,7 +51,7 @@ class App:
             self.profile_load_failed = True
         self.vars = {k: tk.StringVar(value=str(v)) for k, v in asdict(profile).items()}
         self.remember = tk.BooleanVar(value=True)
-        self.status = tk.StringVar(value="Укажите сервер и прокси, затем нажмите «Подключить».")
+        self.status = tk.StringVar(value="Готов к подключению. Параметры сервера — в настройках.")
         from csqtt_client.ui.desktop import DesktopUI
         self.ui = DesktopUI(self, root, profile, APP_VERSION, ROOT)
         for variable in self.vars.values():
@@ -74,6 +77,16 @@ class App:
         root.bind("<Unmap>", self.on_minimize)
         root.bind("<Destroy>", self.on_destroy, add="+")
         root.after(100, self.poll)
+        if persist and (ROOT / "bin/packet-proxy.exe").exists():
+            def recover_proxy():
+                try:
+                    result = subprocess.run([str(ROOT / "bin/packet-proxy.exe"), "--recover-proxy"],
+                                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=10, creationflags=NO_WINDOW)
+                    if result.returncode:
+                        self.events.put(("message", "Не удалось восстановить системный прокси после предыдущего запуска."))
+                except (OSError, subprocess.TimeoutExpired):
+                    self.events.put(("message", "Не удалось проверить восстановление системного прокси."))
+            self.background(recover_proxy)
 
     def start_tray(self):
         from csqtt_client.platform.windows.tray import TrayIcon
@@ -240,9 +253,22 @@ class App:
         self.background(work)
 
     def start(self):
+        if self.core or self.stopping or self.closing:
+            return
         try:
             profile = self.profile()
             hashes = profile.validate()
+            if profile.tun == "1":
+                from csqtt_client.platform.windows.elevation import is_admin, relaunch_for_tun
+                if not is_admin():
+                    if not self.remember.get() or not self.persist:
+                        raise ValueError("Для перезапуска с правами администратора включите сохранение настроек или запустите CSQTT от имени администратора.")
+                    save_profile(profile)
+                    relaunch_for_tun()
+                    self.close()
+                    return
+                if not (ROOT / "bin/wintun.dll").exists():
+                    raise ValueError("Не найден bin/wintun.dll. Распакуйте архив программы целиком.")
             if not (ROOT / "bin" / "csqtt-core.exe").exists() or not (ROOT / "bin" / "packet-proxy.exe").exists():
                 raise ValueError("Не найдены bin/csqtt-core.exe и bin/packet-proxy.exe. Распакуйте portable целиком.")
             # Check listener conflicts before establishing a tunnel.
@@ -256,6 +282,8 @@ class App:
             self.flush_profile()
             self.session += 1
             self.ready = False
+            self.helper_ready = False
+            self.tun_bypass_ips = []
             self.config = None
             self.running_profile = profile
             self.secrets = sorted([profile.password, profile.proxy_password, profile.salt, *hashes, *(h[:8] for h in hashes)], key=len, reverse=True)
@@ -269,9 +297,10 @@ class App:
             self.download_total.set("0.00")
             self.start_button.configure(state="disabled")
             self.stop_button.configure(state="normal")
-            self.append(f"Запущено ядро: TCP через HTTP CONNECT, TURN :443. Потоков запрошено: {profile.workers}, хешей: {len(hashes)}.")
+            transport = "через корпоративный HTTP CONNECT" if profile.internet_mode == "proxy" else "напрямую"
+            self.append(f"Запущено ядро: TCP {transport}, TURN :443. Потоков: {profile.workers}, хешей: {len(hashes)}.")
         except Exception as error:
-            self.ui.show_page("connection")
+            self.ui.show_page("settings")
             messagebox.showerror("Не удалось начать подключение", str(error))
 
     def read_process(self, process, kind, session):
@@ -288,8 +317,14 @@ class App:
         ip, dns = self.config
         args = [str(ROOT / "bin" / "packet-proxy.exe"), "--core", f"127.0.0.1:{self.packet_port}",
                 "--ip", ip, "--dns", dns, "--socks", f"127.0.0.1:{profile.socks_port}", "--http", f"127.0.0.1:{profile.http_port}"]
+        args += ["--parent-pid", str(os.getpid()), "--system-proxy=" + str(profile.system_proxy == "1").lower()]
+        if profile.tun == "1":
+            bypass = [profile.proxy.rsplit(":", 1)[0]] if profile.internet_mode == "proxy" else self.tun_bypass_ips
+            if not bypass:
+                return
+            args += ["--mode", "tun", "--bypass-ip", ",".join(bypass)]
         try:
-            self.helper = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            self.helper = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                            text=True, encoding="utf-8", errors="replace", creationflags=NO_WINDOW)
             self.read_process(self.helper, "helper", self.session)
         except Exception as error:
@@ -297,8 +332,19 @@ class App:
             self.stop()
 
     def process_line(self, kind, line):
+        if kind == "core" and line.startswith("TUN_BYPASS:"):
+            address = str(ipaddress.IPv4Address(line.split(":", 1)[1].strip()))
+            if address not in self.tun_bypass_ips:
+                self.tun_bypass_ips.append(address)
+                if self.helper and self.running_profile.tun == "1" and self.running_profile.internet_mode == "direct":
+                    self.helper_command(f"BYPASS {address}")
+            self.start_helper()
+            return
+        if kind == "helper" and line.startswith("SYSTEM_PROXY_ERROR"):
+            self.status.set("Не удалось изменить системный прокси. Подробности в журнале.")
         if kind == "helper" and line.startswith("PROXY_READY"):
-            self.status.set("Туннель готов, локальные прокси запущены. Проверяю интернет…")
+            self.helper_ready = True
+            self.status.set("Туннель готов. Проверяю интернет…")
             self.ui.set_state("checking")
             self.test_button.configure(state="normal")
             self.check_internet()
@@ -334,6 +380,23 @@ class App:
             return
         self.append(line)
 
+    def helper_command(self, command):
+        try:
+            self.helper.stdin.write(command + "\n")
+            self.helper.stdin.flush()
+        except (OSError, ValueError, AttributeError):
+            self.append("Не удалось передать команду сетевому процессу.")
+
+    def system_proxy_changed(self):
+        if self.helper:
+            self.helper_command("SYSTEM_PROXY_ON" if self.vars["system_proxy"].get() == "1" else "SYSTEM_PROXY_OFF")
+
+    def toggle_connection(self):
+        if self.core:
+            self.stop()
+        else:
+            self.start()
+
     def check_internet(self):
         if not self.helper or not self.running_profile:
             return
@@ -366,8 +429,10 @@ class App:
             return
         self.stopping = True
         self.session += 1
+        tun_process = self.helper if self.running_profile and self.running_profile.tun == "1" else None
         processes = [p for p in (self.helper, self.core) if p]
         self.helper = self.core = None
+        self.helper_ready = False
         for process in processes:
             if process.stdin:
                 try:
@@ -378,7 +443,7 @@ class App:
         def cleanup():
             for process in processes:
                 try:
-                    process.wait(timeout=3)
+                    process.wait(timeout=20 if process is tun_process else 3)
                 except subprocess.TimeoutExpired:
                     process.kill()
                     process.wait()

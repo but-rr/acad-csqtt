@@ -32,6 +32,7 @@ def copy_notices(source, name):
 include_file(root / "LICENSE", "CSQTT")
 include_file(root / "NOTICE.md", "CSQTT")
 include_file(root / "assets/fonts/OFL.txt", "Nunito Sans")
+include_file(root / "build/wintun/wintun/LICENSE.txt", "Wintun 0.14.1")
 copy_notices(Path(sys.base_prefix), "Python")
 for distribution in ("pyinstaller", "pystray", "Pillow", "six"):
     for item in importlib.metadata.files(distribution) or []:

@@ -3,7 +3,45 @@ import tkinter as tk
 from tkinter import ttk
 from PIL import ImageTk
 
-from csqtt_client.ui.theme import BG, PANEL, SOFT, TEXT, rounded_surface, ui_font
+from csqtt_client.ui.theme import BG, PANEL, SOFT, TEXT, MINT, MUTED, FIELD, rounded_surface, ui_font
+
+
+class PowerButton(tk.Canvas):
+    """Keyboard-accessible circular connection control with no layout animation."""
+    def __init__(self, parent, command, scale=1):
+        self.diameter = round(122 * scale)
+        super().__init__(parent, width=self.diameter, height=self.diameter,
+                         bg=parent.cget("bg"), highlightthickness=0, bd=0, takefocus=True, cursor="hand2")
+        self.command, self.state, self.hover = command, "offline", False
+        self.bind("<Button-1>", self.activate)
+        self.bind("<Return>", self.activate)
+        self.bind("<space>", self.activate)
+        self.bind("<Enter>", lambda e: self.paint(hover=True))
+        self.bind("<Leave>", lambda e: self.paint(hover=False))
+        self.bind("<FocusIn>", lambda e: self.paint())
+        self.bind("<FocusOut>", lambda e: self.paint())
+        self.paint()
+
+    def activate(self, event=None):
+        if self.state != "stopping":
+            self.focus_set()
+            self.command()
+        return "break"
+
+    def paint(self, state=None, hover=None):
+        if state is not None:
+            self.state = state
+        if hover is not None:
+            self.hover = hover
+        self.delete("all")
+        d = self.diameter
+        color = MINT if self.state == "online" else TEXT if self.hover else MUTED
+        self.create_oval(3, 3, d-3, d-3, outline=MINT if self.focus_get() == self else SOFT, width=2)
+        self.create_oval(11, 11, d-11, d-11, fill=FIELD if self.hover else PANEL, outline=SOFT, width=1)
+        self.create_arc(d*.34, d*.31, d*.66, d*.63, start=135, extent=270, style="arc", outline=color, width=4)
+        self.create_line(d*.5, d*.26, d*.5, d*.46, fill=color, width=4, capstyle="round")
+        text = "Отключить" if self.state not in ("offline", "stopping") else "Подключить" if self.state == "offline" else "Отключение…"
+        self.create_text(d*.5, d*.76, text=text, fill=color, font=ui_font(10, True))
 
 
 def label(parent, text=None, variable=None, size=10, color=TEXT, bold=False, **kwargs):

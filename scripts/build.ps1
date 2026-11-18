@@ -19,6 +19,8 @@ $goExe = if (Get-Command go -ErrorAction SilentlyContinue) { 'go' } elseif (Test
 & cargo build --release --locked --manifest-path core\rust-client\Cargo.toml
 if ($LASTEXITCODE -ne 0) { throw 'CSQTT build failed' }
 New-Item -ItemType Directory -Path bin -Force | Out-Null
+& python scripts\prepare_wintun.py
+if ($LASTEXITCODE -ne 0) { throw 'Wintun preparation failed' }
 Copy-Item -LiteralPath core\rust-client\target\release\client.exe -Destination bin\csqtt-core.exe -Force
 Push-Location packet-proxy
 try {
@@ -47,7 +49,7 @@ if (-not $smoke.WaitForExit(15000)) {
     throw 'Packaged GUI did not exit within 15 seconds'
 }
 if ($smoke.ExitCode -ne 0) { throw "Packaged GUI failed: $($smoke.ExitCode)" }
-& python -c "import pathlib,sys,zipfile; p=pathlib.Path(sys.argv[1]); z=zipfile.ZipFile(sys.argv[2], 'w', zipfile.ZIP_DEFLATED, strict_timestamps=False); [z.write(f, f.relative_to(p)) for f in p.rglob('*') if f.is_file()]; z.close(); z=zipfile.ZipFile(sys.argv[2]); names=set(z.namelist()); assert z.testzip() is None; assert {'CSQTT.exe','bin/csqtt-core.exe','bin/packet-proxy.exe','bin/VCRUNTIME140.dll','assets/icons/CSQTT.ico','_internal/VERSION','_internal/THIRD_PARTY_NOTICES.txt'}.issubset(names); assert not names.intersection({'LICENSE','NOTICE.md','README.md','SHA256SUMS.txt','profile.json','profile.tmp'}); assert not any(n.startswith('licenses/') for n in names)" $packageDir $archiveName
+& python -c "import pathlib,sys,zipfile; p=pathlib.Path(sys.argv[1]); z=zipfile.ZipFile(sys.argv[2], 'w', zipfile.ZIP_DEFLATED, strict_timestamps=False); [z.write(f, f.relative_to(p)) for f in p.rglob('*') if f.is_file()]; z.close(); z=zipfile.ZipFile(sys.argv[2]); names=set(z.namelist()); assert z.testzip() is None; assert {'CSQTT.exe','bin/csqtt-core.exe','bin/packet-proxy.exe','bin/wintun.dll','bin/VCRUNTIME140.dll','assets/icons/CSQTT.ico','_internal/VERSION','_internal/THIRD_PARTY_NOTICES.txt'}.issubset(names); assert not names.intersection({'LICENSE','NOTICE.md','README.md','SHA256SUMS.txt','profile.json','profile.tmp'}); assert not any(n.startswith('licenses/') for n in names)" $packageDir $archiveName
 if ($LASTEXITCODE -ne 0) { throw 'ZIP packaging failed' }
 $archiveHash = (Get-FileHash -LiteralPath $archiveName -Algorithm SHA256).Hash.ToLowerInvariant()
 "$archiveHash  $archiveName" | Set-Content -LiteralPath "$archiveName.sha256" -Encoding ASCII

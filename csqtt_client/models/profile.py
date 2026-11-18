@@ -20,23 +20,29 @@ class Profile:
     srtp: str = "auto"
     generation: str = "0"
     salt: str = ""
+    internet_mode: str = "proxy"
+    system_proxy: str = "0"
+    tun: str = "0"
 
     def validate(self):
         host, port = split_address(self.server)
         if not host or not 1 <= port <= 65535:
             raise ValueError("Сервер csqtt: укажите IP или домен и порт, например 203.0.113.10:443.")
-        phost, pport = split_address(self.proxy)
-        ipaddress.ip_address(phost)
-        if not 1 <= pport <= 65535:
-            raise ValueError("Проверьте порт корпоративного прокси.")
+        if self.internet_mode not in ("proxy", "direct") or self.system_proxy not in ("0", "1") or self.tun not in ("0", "1"):
+            raise ValueError("Неверный режим подключения.")
+        if self.internet_mode == "proxy":
+            phost, pport = split_address(self.proxy)
+            ipaddress.IPv4Address(phost)
+            if not 1 <= pport <= 65535:
+                raise ValueError("Проверьте порт корпоративного прокси.")
         if not self.password:
             raise ValueError("Введите пароль пользователя сервера csqtt.")
         hashes = normalize_hashes(self.hashes)
         if not 1 <= len(hashes) <= 6:
             raise ValueError("Нужно от 1 до 6 хешей VK или ссылок /call/join/.")
-        if self.proxy_user and not self.proxy_password:
+        if self.internet_mode == "proxy" and self.proxy_user and not self.proxy_password:
             raise ValueError("Введите пароль корпоративного прокси.")
-        if ":" in self.proxy_user or any(c in self.proxy_user + self.proxy_password for c in "\r\n"):
+        if self.internet_mode == "proxy" and (":" in self.proxy_user or any(c in self.proxy_user + self.proxy_password for c in "\r\n")):
             raise ValueError("Логин/пароль прокси содержат недопустимые символы.")
         if self.turn and (":" in self.turn or "/" in self.turn or any(c.isspace() for c in self.turn)):
             raise ValueError("TURN: только IPv4 или имя хоста без схемы и порта. Порт фиксирован: 443.")

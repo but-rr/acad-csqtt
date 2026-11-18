@@ -670,6 +670,7 @@ fn build_browser_client(
     captcha_order: bool,
 ) -> Result<Client> {
     let mut builder = Client::builder()
+        .no_proxy()
         .impersonate(browser)
         .impersonate_os(os)
         .timeout(Duration::from_secs(20))

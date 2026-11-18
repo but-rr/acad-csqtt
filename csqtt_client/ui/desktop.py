@@ -8,7 +8,7 @@ from csqtt_client.ui.theme import (
     BG, PANEL, FIELD, DEEP, TEXT, MUTED, DIM, LINE, SOFT, MINT, AMBER, RED, HEADER, ui_font,
 )
 from csqtt_client.ui.styles import configure_style
-from csqtt_client.ui.widgets import Panel, ScrollPage, label, frame
+from csqtt_client.ui.widgets import Panel, ScrollPage, PowerButton, label, frame
 
 
 class DesktopUI:
@@ -51,7 +51,7 @@ class DesktopUI:
         self.nav = {}
         self.nav_images = {}
         for key, text, icon in (("connection", "Туннель", "connection"),
-                                ("settings", "Опции", "settings"), ("logs", "Журнал", "logs")):
+                                ("settings", "Настройки", "settings"), ("logs", "Журнал", "logs")):
             self.nav_images[key] = (self.icon(icon), self.icon(icon, "#25262b"))
             button = ttk.Button(rail, text=text, image=self.nav_images[key][0], compound="none",
                                 style="Nav.TButton", command=lambda k=key: self.show_page(k), takefocus=True)
@@ -116,6 +116,9 @@ class DesktopUI:
         app.start_button.pack(side="left")
         app.stop_button = ttk.Button(actions, text="Отключить", style="Footer.TButton", command=app.stop, state="disabled")
         app.stop_button.pack(side="left", padx=10)
+        app.start_button.pack_forget()
+        app.stop_button.pack_forget()
+        ttk.Button(actions, text="Настройки подключения", command=lambda: self.show_page("settings")).pack(side="left")
         app.test_button = ttk.Button(actions, text="Проверить интернет", style="Footer.TButton", command=app.check_internet, state="disabled")
         app.test_button.pack(side="right")
 
@@ -124,7 +127,7 @@ class DesktopUI:
         self.pages.rowconfigure(0, weight=1)
         self.pages.columnconfigure(0, weight=1)
         self.connection_page(profile)
-        self.settings_page()
+        self.configuration_page(profile)
         self.logs_page()
         self.show_page("connection")
         previous_compact = None
@@ -275,6 +278,36 @@ class DesktopUI:
 
     def connection_page(self, profile):
         body = self.page_frame("connection")
+        surface = Panel(body, padding=18, radius=24)
+        surface.pack(fill="x")
+        self.power = PowerButton(surface.body, self.app.toggle_connection, self.scale)
+        self.power.pack(pady=(0, 10))
+        self.connection_hint = label(surface.body, "Выберите режим и нажмите «Подключить»", size=9, color=MUTED, anchor="center")
+        modes = frame(surface.body)
+        modes.pack(anchor="center")
+        self.mode_controls = []
+        for text, key in (("Системный прокси", "system_proxy"), ("TUN · весь компьютер", "tun")):
+            control = ttk.Checkbutton(modes, text=text, variable=self.app.vars[key], onvalue="1", offvalue="0", style="Panel.TCheckbutton",
+                                      command=self.app.system_proxy_changed if key == "system_proxy" else None)
+            control.pack(side="left", padx=10)
+            if key == "tun": self.mode_controls.append(control)
+            self.tooltip(control, "Применяется после подключения. При отключении восстанавливаются прежние параметры Windows."
+                         if key == "system_proxy" else "Для сетевого адаптера Windows запросит права администратора. IPv6 блокируется на время TUN.")
+        tk.Frame(surface.body, height=1, bg=SOFT).pack(fill="x", pady=12)
+        self.corporate_switch = ttk.Checkbutton(surface.body, text="Корпоративный прокси",
+            variable=self.app.vars["internet_mode"], onvalue="proxy", offvalue="direct", style="Switch.TCheckbutton")
+        self.corporate_switch.pack(anchor="center")
+        self.mode_controls.append(self.corporate_switch)
+        self.internet_hint = label(surface.body, "", size=9, color=MUTED, anchor="center")
+        self.internet_hint.pack(fill="x", pady=(5, 0))
+        def changed(*args):
+            corp = self.app.vars["internet_mode"].get() == "proxy"
+            self.internet_hint.configure(text="Через HTTP CONNECT · TCP / 443" if corp else "Прямое подключение · Wi-Fi или обычный интернет")
+        self.app.vars["internet_mode"].trace_add("write", changed)
+        changed()
+
+    def configuration_page(self, profile):
+        body = self.page_frame("settings")
         body.columnconfigure(0, weight=3, uniform="connection")
         body.columnconfigure(1, weight=2, uniform="connection")
         server = self.section(body, "Сервер csqtt", "Данные подключения с вашего сервера.")
@@ -317,9 +350,11 @@ class DesktopUI:
         self.profile_feedback = label(remember, "Пароли и хеши сохраняются в profile.json открытым текстом.", size=8, color=DIM)
         self.profile_feedback.pack(anchor="w", padx=4, pady=(3, 0))
         self.adapt_columns(body, server, side, "connection", remember)
+        self.advanced_settings(body)
 
-    def settings_page(self):
-        body = self.page_frame("settings")
+    def advanced_settings(self, parent):
+        body = frame(parent)
+        body.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(14, 0))
         body.columnconfigure(0, weight=1, uniform="settings")
         body.columnconfigure(1, weight=1, uniform="settings")
         transport = self.section(body, "Параметры туннеля", "Режимы должны соответствовать настройкам сервера.")
@@ -403,7 +438,7 @@ class DesktopUI:
             if not hasattr(page, "focus_targets"):
                 page.focus_targets = []
                 def collect(widget):
-                    if isinstance(widget, (ttk.Entry, ttk.Button, ttk.Checkbutton, tk.Text)):
+                    if isinstance(widget, (ttk.Entry, ttk.Button, ttk.Checkbutton, tk.Text, PowerButton)):
                         page.focus_targets.append((widget, widget.cget("takefocus")))
                     for child in widget.winfo_children():
                         collect(child)
@@ -417,8 +452,8 @@ class DesktopUI:
         focused = self.root.focus_get()
         if focused and str(focused).startswith(str(self.pages)) and not str(focused).startswith(str(getattr(self, key))):
             self.nav[key].focus_set()
-        titles = {"connection": ("Подключение", "Интернет через ваш сервер csqtt и корпоративный прокси."),
-                  "settings": ("Параметры", "Транспорт, локальные порты и параметры сессии."),
+        titles = {"connection": ("Подключение", "Интернет через ваш сервер CSQTT."),
+                  "settings": ("Настройки", "Сервер, корпоративный прокси и параметры туннеля."),
                   "logs": ("Журнал", "События ядра, состояние туннеля и диагностика.")}
         title, subtitle = titles[key]
         self.heading.configure(text=title)
@@ -440,6 +475,10 @@ class DesktopUI:
                        "unconfirmed": ("Интернет не подтверждён", AMBER),
                        "recovering": ("Восстановление", AMBER), "stopping": ("Отключение", DIM)}[state]
         self.badge.configure(text=f"●  {text}", fg=color)
+        self.power.paint(state=state)
+        self.connection_hint.configure(text=text, fg=color)
+        for control in self.mode_controls:
+            control.configure(state="normal" if state == "offline" else "disabled")
         self.status_label.configure(fg=color if state in ("online", "unconfirmed", "recovering") else MUTED)
         self.update_endpoints()
 
@@ -449,9 +488,9 @@ class DesktopUI:
         self.root.after_idle(self.reveal_proxy_result)
 
     def reveal_proxy_result(self):
-        if self.page != "connection" or not self.proxy_feedback.winfo_ismapped():
+        if self.page != "settings" or not self.proxy_feedback.winfo_ismapped():
             return
-        page = self.connection
+        page = self.settings
         bottom = self.proxy_feedback.winfo_rooty() - page.body.winfo_rooty() + self.proxy_feedback.winfo_height() + 10
         visible_bottom = page.canvas.canvasy(0) + page.canvas.winfo_height()
         if bottom > visible_bottom:

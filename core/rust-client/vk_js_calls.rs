@@ -66,14 +66,18 @@ pub async fn start(
     if bootstrap.token.trim().is_empty() {
         bail!("VK access token отсутствует");
     }
-    let client = Client::builder()
+    let mut builder = Client::builder()
+        .no_proxy()
         .impersonate(profile.impersonate)
         .impersonate_os(profile.os)
         .timeout(Duration::from_secs(15))
         .connect_timeout(Duration::from_secs(8))
         .redirect(primp::redirect::Policy::limited(5))
-        .dns_resolver(crate::dns::global())
-        .build()
+        .dns_resolver(crate::dns::global());
+    if crate::http_proxy::configured() {
+        builder = builder.proxy(crate::http_proxy::http_proxy()?);
+    }
+    let client = builder.build()
         .context("инициализация браузерного HTTP-клиента")?;
     let access_token = bootstrap.token;
     let device_id = Uuid::new_v4().to_string();

@@ -11,11 +11,16 @@ repository license. Preserve the repository license when redistributing.
 Modifications: explicit authenticated HTTP CONNECT for TURN/TCP/TLS and VK API,
 proxy-only bootstrap DNS over HTTPS, rejection of TURN/UDP in proxy mode,
 worker-count renegotiation on established streams after reconnect,
-native Windows launcher, DPAPI profile storage, and local SOCKS5/HTTP proxies.
+native Windows launcher, portable profile storage, local SOCKS5/HTTP proxies,
+Windows system proxy management, direct internet mode and native Wintun routing.
+The initial Windows TUN implementation was adapted from ARES-glitch-cpu/acad-csqtt
+(pull request 1, revision 04f7191e8bd407857c16092d36aeb9e8ab9cd71f).
 
 The packet proxy uses the WireGuard Go netstack package (MIT) and gVisor
 (Apache 2.0); it does not establish a WireGuard connection.
 The GUI is packaged with Python, Tcl/Tk and PyInstaller.
+The Windows distribution includes the official signed Wintun 0.14.1 AMD64 DLL.
+Its binary distribution license is included in the third-party notices below.
 Third-party copyright and license texts are provided in _internal/THIRD_PARTY_NOTICES.txt.
 
 The UI includes Nunito Sans, Copyright 2016 The Nunito Sans Project Authors,
