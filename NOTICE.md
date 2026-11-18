@@ -18,7 +18,8 @@ The initial Windows TUN implementation was adapted from ARES-glitch-cpu/acad-csq
 
 The packet proxy uses the WireGuard Go netstack package (MIT) and gVisor
 (Apache 2.0); it does not establish a WireGuard connection.
-The GUI is packaged with Python, Tcl/Tk and PyInstaller.
+The desktop shell uses Wails v2 (MIT), Svelte (MIT), TypeScript and WebView2.
+The prior Python/Tkinter shell is no longer distributed.
 The Windows distribution includes the official signed Wintun 0.14.1 AMD64 DLL.
 Its binary distribution license is included in the third-party notices below.
 Third-party copyright and license texts are provided in _internal/THIRD_PARTY_NOTICES.txt.
