@@ -60,6 +60,7 @@ type Manager struct {
 	port                int
 	configIP, configDNS string
 	ready               bool
+	internetChecking    bool
 	bypass              []string
 	secrets             []string
 	ctx                 context.Context
@@ -183,6 +184,7 @@ func (m *Manager) Start(p Profile) error {
 	m.session++
 	m.profile = p
 	m.ready = false
+	m.internetChecking = false
 	m.configIP = ""
 	m.configDNS = ""
 	m.bypass = nil
@@ -401,15 +403,18 @@ func (m *Manager) SetSystemProxy(enabled bool) {
 }
 func (m *Manager) CheckInternet() {
 	m.mu.Lock()
-	if !m.state.Ready {
+	if !m.state.Ready || m.internetChecking {
 		m.mu.Unlock()
 		return
 	}
 	p, session := m.profile, m.session
+	m.internetChecking = true
+	m.set("checking", "Проверяю доступ в интернет…")
 	m.mu.Unlock()
 	ip, e := CheckInternet(m.ctx, p)
 	m.mu.Lock()
 	if session == m.session {
+		m.internetChecking = false
 		if e != nil {
 			m.set("unconfirmed", e.Error())
 		} else {
