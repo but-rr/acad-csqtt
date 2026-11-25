@@ -31,10 +31,13 @@ type Profile struct {
 	InternetMode  string `json:"internet_mode"`
 	SystemProxy   string `json:"system_proxy"`
 	Tun           string `json:"tun"`
+	DNSMode       string `json:"dns_mode"`
+	DNSPrimary    string `json:"dns_primary"`
+	DNSSecondary  string `json:"dns_secondary"`
 }
 
 func DefaultProfile() Profile {
-	return Profile{Proxy: "10.0.0.1:3128", SocksPort: "1080", HTTPPort: "8080", Workers: "6", Obfs: "unified", SRTP: "auto", Generation: "0", InternetMode: "proxy", SystemProxy: "0", Tun: "0"}
+	return Profile{Proxy: "10.0.0.1:3128", SocksPort: "1080", HTTPPort: "8080", Workers: "6", Obfs: "unified", SRTP: "auto", Generation: "0", InternetMode: "proxy", SystemProxy: "0", Tun: "0", DNSMode: "server"}
 }
 
 var separators = regexp.MustCompile(`[\s,;]+`)
@@ -72,6 +75,9 @@ func Address(value string) (string, int, error) {
 	return host, number, nil
 }
 func (p Profile) Validate() ([]string, error) {
+	if _, e := p.ResolverDNS(""); e != nil {
+		return nil, e
+	}
 	if _, _, e := Address(p.Server); e != nil {
 		return nil, fmt.Errorf("Сервер CSQTT: %w", e)
 	}

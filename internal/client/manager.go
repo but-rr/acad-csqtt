@@ -213,18 +213,14 @@ func (m *Manager) helperLocked() {
 	if m.helper != nil || !m.ready || m.configIP == "" || m.core == nil || m.state.Status == "stopping" {
 		return
 	}
-	p := m.profile
-	args := []string{filepath.Join(m.Directory, "bin/packet-proxy.exe"), "--core", fmt.Sprintf("127.0.0.1:%d", m.port), "--ip", m.configIP, "--dns", m.configDNS, "--socks", "127.0.0.1:" + p.SocksPort, "--http", "127.0.0.1:" + p.HTTPPort, "--parent-pid", fmt.Sprint(os.Getpid()), "--system-proxy=" + fmt.Sprint(p.SystemProxy == "1")}
-	if p.Tun == "1" {
-		bypass := m.bypass
-		if p.InternetMode == "proxy" {
-			host, _, _ := Address(p.Proxy)
-			bypass = []string{host}
-		}
-		if len(bypass) == 0 {
-			return
-		}
-		args = append(args, "--mode", "tun", "--bypass-ip", strings.Join(bypass, ","))
+	args, e := m.helperCommand()
+	if e != nil {
+		m.log(e.Error())
+		go m.Stop()
+		return
+	}
+	if args == nil {
+		return
 	}
 	helper, e := m.launch(args, os.Environ(), "helper", m.session)
 	if e != nil {
@@ -233,6 +229,31 @@ func (m *Manager) helperLocked() {
 		return
 	}
 	m.helper = helper
+	dns, _ := m.profile.ResolverDNS(m.configDNS)
+	m.log("DNS подключения: " + dns)
+}
+
+// Called with m.mu held; keeps the helper CLI contract testable without
+// creating an OS adapter or changing this computer's DNS.
+func (m *Manager) helperCommand() ([]string, error) {
+	p := m.profile
+	dns, e := p.ResolverDNS(m.configDNS)
+	if e != nil {
+		return nil, e
+	}
+	args := []string{filepath.Join(m.Directory, "bin/packet-proxy.exe"), "--core", fmt.Sprintf("127.0.0.1:%d", m.port), "--ip", m.configIP, "--dns", dns, "--socks", "127.0.0.1:" + p.SocksPort, "--http", "127.0.0.1:" + p.HTTPPort, "--parent-pid", fmt.Sprint(os.Getpid()), "--system-proxy=" + fmt.Sprint(p.SystemProxy == "1")}
+	if p.Tun == "1" {
+		bypass := m.bypass
+		if p.InternetMode == "proxy" {
+			host, _, _ := Address(p.Proxy)
+			bypass = []string{host}
+		}
+		if len(bypass) == 0 {
+			return nil, nil
+		}
+		args = append(args, "--mode", "tun", "--bypass-ip", strings.Join(bypass, ","))
+	}
+	return args, nil
 }
 func (m *Manager) consume(session uint64, kind, line string) {
 	m.mu.Lock()
