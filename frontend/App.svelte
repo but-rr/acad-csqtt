@@ -3,6 +3,7 @@
  import TitleBar from './components/TitleBar.svelte';
  import Icon from './components/Icon.svelte';
  import Fields from './components/Fields.svelte';
+ import DNSSettings from './components/DNSSettings.svelte';
  import UpdateDialog from './components/UpdateDialog.svelte';
  import logo from '../assets/icons/CS_logo.png';
  import {backend} from './api';
@@ -62,6 +63,7 @@
  <section class="card settings-card"><h2>Корпоративный прокси</h2><p>Используется, когда переключатель на главном экране включён.</p><Fields disabled={running} bind:profile changed={dirty} fields={[{key:'proxy',label:'Адрес прокси · IPv4:порт'},{key:'proxy_user',label:'Логин'},{key:'proxy_password',label:'Пароль прокси',secret:true}]}/><button class="btn" disabled={proxyBusy} on:click={checkProxy}><Icon name="refresh" size={16}/>Проверить прокси :443</button>{#if proxyMessage}<p class="feedback" class:success={proxyOK} role="status">{proxyMessage}</p>{/if}</section>
  <section class="card settings-card"><h2>Туннель</h2><Fields disabled={running} bind:profile changed={dirty} fields={[{key:'workers',label:'Количество потоков'},{key:'obfs',label:'Обфускация',options:['unified','audio','video']},{key:'srtp',label:'SRTP',options:['auto','wrap','dtls']},{key:'turn',label:'TURN-хост',hint:'Необязательно · без схемы и порта'}]}/></section>
  <section class="card settings-card"><h2>Порты и сессия</h2><Fields disabled={running} bind:profile changed={dirty} fields={[{key:'socks_port',label:'Локальный SOCKS5'},{key:'http_port',label:'Локальный HTTP'},{key:'generation',label:'Поколение'},{key:'salt',label:'Salt',secret:true}]}/></section>
+ <DNSSettings bind:profile disabled={running} changed={dirty}/>
  <section class="card settings-card"><h2>Сохранение настроек</h2><label class="check"><input type="checkbox" bind:checked={remember} on:change={dirty}/><span>Сохранять рядом с программой</span></label><p>Все настройки сохраняются в <code>profile.json</code>. Пароли и хеши хранятся открытым текстом. Для переноса скопируйте всю папку программы.</p><span class="save-status" role="status">{saveMessage||'Изменения сохраняются автоматически'}</span></section>
  <section class="card settings-card"><h2>Обновления</h2><p>Установлена версия v{version}</p><button class="btn" disabled={state.updateChecking} on:click={()=>void checkUpdates().catch(e=>error=String(e))}><Icon name="refresh" size={16}/>{state.updateChecking?'Проверяю…':'Проверить обновления'}</button><p class="feedback">{state.updateMessage}</p>{#if state.update}<button class="text-button" on:click={()=>modal=state.update}>Посмотреть обновление<Icon name="arrow" size={14}/></button>{/if}</section></div>
  </div>

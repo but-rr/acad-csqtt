@@ -1,5 +1,19 @@
 {
- "$schema":"https://wails.io/schemas/config.v2.json","name":"CSQTT","outputfilename":"CSQTT",
- "frontend:install":"npm ci --no-audit --no-fund","frontend:build":"npm run build","frontend:dev:watcher":"npm run dev","frontend:dev:serverUrl":"auto",
- "author":{"name":"CSQTT"},"info":{"companyName":"CSQTT","productName":"CSQTT","productVersion":"1.4.1","copyright":"CSQTT","comments":"CSQTT client for Windows 10"}
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "CSQTT",
+  "outputfilename": "CSQTT",
+  "frontend:install": "npm ci --no-audit --no-fund",
+  "frontend:build": "npm run build",
+  "frontend:dev:watcher": "npm run dev",
+  "frontend:dev:serverUrl": "auto",
+  "author": {
+    "name": "CSQTT"
+  },
+  "info": {
+    "companyName": "CSQTT",
+    "productName": "CSQTT",
+    "productVersion": "1.4.2",
+    "copyright": "CSQTT",
+    "comments": "CSQTT client for Windows 10"
+  }
 }
